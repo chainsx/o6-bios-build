@@ -1,0 +1,59 @@
+name: Build-O6-Firmware-BIOS
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare_release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Get time
+        id: time
+        uses: nanzm/get-time-action@v1.1
+        with:
+          format: 'YYYYMMDD-HHmm'
+      - name: Create empty release
+        id: release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.time.outputs.time }}
+          body_path: VERSION
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target_commitish: main
+          draft: false
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+  build:
+    runs-on: ubuntu-22.04
+    needs: prepare_release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Build
+        shell: bash
+        run: |
+          sudo apt-get install git gcc g++ build-essential \
+                               gcc-aarch64-linux-gnu acpica-tools \
+                               python3-pyelftools uuid-dev \
+                               python-is-python3 device-tree-compiler
+          git clone --depth=1 https://github.com/radxa/edk2-non-osi -b cix_beta2_radxa_dev_250110_patch
+          git clone --depth=1 https://github.com/radxa/edk2-platforms -b cix_beta2_radxa_dev_250110_patch
+          git clone --depth=1 https://github.com/radxa/edk2 -b cix_beta2_radxa_dev_250110_patch
+          ./build_and_package.sh O6
+      - name: Upload
+        if: needs.prepare_release.outputs.release_id != ''
+        uses: xresloader/upload-to-github-release@v1
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ needs.prepare_release.outputs.release_id }}
+          file: "./output/*.bin*"
+          draft: false
+      - name: Rollback release
+        if: failure() && needs.prepare_release.outputs.release_id != ''
+        uses: author/action-rollback@stable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ needs.prepare_release.outputs.release_id }}
